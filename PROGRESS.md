@@ -4,6 +4,44 @@ Host-level changelog tracking significant work on the NanoClaw system.
 
 ---
 
+## 2026-03-10 — OAuth Migration to Internal Workspace App
+
+### Problem
+Joel's email OAuth (`joel@commitimpact.com`) broke with `invalid_grant` despite resetting the token the same day. The GCP OAuth app (`thomas-bot-488621`) was owned by `joelaustin.co@gmail.com` (personal Gmail). Publishing the app to Production triggered Google's verification requirements — External apps that aren't verified get blocked with `Error 400: invalid_request` ("doesn't comply with Google's OAuth 2.0 policy").
+
+### Root Cause Chain
+1. **App in Testing mode** → tokens expire after 7 days (original issue from March 9)
+2. **Published to Production** → unverified External apps are blocked for non-test users
+3. **Can't add test users** → Workspace accounts (`@commitimpact.com`) require lowercase and must exist as Google accounts
+4. **Can't use Internal** → the old project was on a personal Gmail, not a Workspace account
+
+### Fix: New GCP Project on Workspace
+- Created new GCP project `thomas-bot2` under `joel@commitimpact.com` (Workspace-billed account)
+- Set OAuth consent screen to **Internal** — all `@commitimpact.com` users allowed, no verification needed, no token expiry
+- Enabled Gmail API, Calendar API, Drive API
+- Generated new OAuth client ID (Desktop app): `441147492057-guhfdikeb5d02p140hp7onasgtkmvk4u`
+
+### Auth Tool Bug
+The `@gongrzhe/server-gmail-autoauth-mcp` auth tool has two issues:
+1. **Ignores `--keys`/`--creds` flags** — treats `process.argv[3]` as redirect_uri callback, reads keys only from `~/.gmail-mcp/gcp-oauth.keys.json`
+2. **Hardcodes scopes** — only requests `gmail.modify` and `gmail.settings.basic`, missing `gmail.send`, `calendar`, `drive`
+
+Workaround: custom script (`/tmp/oauth-full-scope.js`) using `google-auth-library` directly with `prompt: 'consent'` and all 4 scopes.
+
+### Re-authorized Both Accounts
+- `joel@commitimpact.com` — full scopes (gmail.modify, gmail.send, calendar, drive)
+- `thomas@commitimpact.com` — full scopes (gmail.modify, gmail.send, calendar, drive)
+- Old app (`thomas-bot-488621` on `joelaustin.co`) is now unused
+
+### Files Changed
+- `data/email-credentials/joel-commit/gcp-oauth.keys.json` — new client ID from `thomas-bot2`
+- `data/email-credentials/thomas/gcp-oauth.keys.json` — new client ID from `thomas-bot2`
+- `data/email-credentials/joel-commit/credentials.json` — fresh tokens with full scopes
+- `data/email-credentials/thomas/credentials.json` — fresh tokens with full scopes
+- `~/.gmail-mcp/gcp-oauth.keys.json` — updated (used by auth tool cache)
+
+---
+
 ## 2026-03-10 — Managed Conversation Upstream Channel (Fixed)
 
 ### Problem
