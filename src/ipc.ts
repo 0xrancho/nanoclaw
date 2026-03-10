@@ -16,6 +16,8 @@ import { RegisteredGroup } from './types.js';
 
 export interface IpcDeps {
   sendMessage: (jid: string, text: string) => Promise<void>;
+  /** Store a message directly in the DB (for inject_context — bypasses channel send) */
+  injectMessage: (chatJid: string, text: string, senderName: string) => void;
   registeredGroups: () => Record<string, RegisteredGroup>;
   registerGroup: (jid: string, group: RegisteredGroup) => void;
   syncGroupMetadata: (force: boolean) => Promise<void>;
@@ -29,6 +31,29 @@ export interface IpcDeps {
 }
 
 let ipcWatcherRunning = false;
+
+/**
+ * Tracks chats that received IPC messages from their own group's container.
+ * Key: chatJid. When the streaming output path sees a result for a chatJid
+ * in this set, it skips sending (the agent already sent via send_message).
+ * Cleared per-chat when a new container run starts.
+ */
+const ipcSentToOwnChat = new Set<string>();
+
+/** Mark that IPC delivered a message to this chat from its own group. */
+export function markIpcSent(chatJid: string): void {
+  ipcSentToOwnChat.add(chatJid);
+}
+
+/** Check whether IPC already delivered messages to this chat. */
+export function hasIpcSent(chatJid: string): boolean {
+  return ipcSentToOwnChat.has(chatJid);
+}
+
+/** Clear the IPC-sent flag for a chat (call when starting a new container run). */
+export function clearIpcSent(chatJid: string): void {
+  ipcSentToOwnChat.delete(chatJid);
+}
 
 export function startIpcWatcher(deps: IpcDeps): void {
   if (ipcWatcherRunning) {
@@ -71,14 +96,53 @@ export function startIpcWatcher(deps: IpcDeps): void {
             const filePath = path.join(messagesDir, file);
             try {
               const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-              if (data.type === 'message' && data.chatJid && data.text) {
+              // inject_context: main injects a message into a managed group's DB queue
+              if (data.type === 'inject_context' && isMain && data.targetJid && data.text) {
+                const targetGroup = registeredGroups[data.targetJid];
+                if (targetGroup) {
+                  deps.injectMessage(data.targetJid, data.text, '[Feedback from Joel]');
+                  logger.info(
+                    { targetJid: data.targetJid, sourceGroup },
+                    'Context injected into managed group',
+                  );
+                } else {
+                  logger.warn(
+                    { targetJid: data.targetJid, sourceGroup },
+                    'inject_context: target group not registered',
+                  );
+                }
+                fs.unlinkSync(filePath);
+                continue;
+              }
+
+              if ((data.type === 'message' || data.type === 'report_to_main') && data.chatJid && data.text) {
                 // Authorization: verify this group can send to this chatJid
                 const targetGroup = registeredGroups[data.chatJid];
+
+                // Managed groups can report upstream to main via report_to_main
+                const isManagedReportToMain =
+                  data.type === 'report_to_main' &&
+                  Object.entries(registeredGroups).some(
+                    ([jid, g]) =>
+                      jid.startsWith('managed:') &&
+                      g.folder === sourceGroup,
+                  ) &&
+                  targetGroup?.folder === MAIN_GROUP_FOLDER;
+
                 if (
                   isMain ||
+                  isManagedReportToMain ||
                   (targetGroup && targetGroup.folder === sourceGroup)
                 ) {
                   await deps.sendMessage(data.chatJid, data.text);
+                  // Track same-chat IPC sends so the streaming output
+                  // path can skip its duplicate delivery.
+                  const isOwnChat = Object.entries(registeredGroups).some(
+                    ([jid, g]) => g.folder === sourceGroup && jid === data.chatJid,
+                  );
+                  if (isOwnChat) {
+                    markIpcSent(data.chatJid);
+                  }
                   logger.info(
                     { chatJid: data.chatJid, sourceGroup },
                     'IPC message sent',
@@ -96,12 +160,16 @@ export function startIpcWatcher(deps: IpcDeps): void {
                 { file, sourceGroup, err },
                 'Error processing IPC message',
               );
-              const errorDir = path.join(ipcBaseDir, 'errors');
-              fs.mkdirSync(errorDir, { recursive: true });
-              fs.renameSync(
-                filePath,
-                path.join(errorDir, `${sourceGroup}-${file}`),
-              );
+              try {
+                const errorDir = path.join(ipcBaseDir, 'errors');
+                fs.mkdirSync(errorDir, { recursive: true });
+                fs.renameSync(
+                  filePath,
+                  path.join(errorDir, `${sourceGroup}-${file}`),
+                );
+              } catch {
+                // File already gone (e.g. deleted between read and unlink) — ignore
+              }
             }
           }
         }

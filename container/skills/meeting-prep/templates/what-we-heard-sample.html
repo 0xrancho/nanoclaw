@@ -1,0 +1,602 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>What We Heard | CMT Infrastructure Professionals | Commit Impact</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;1,9..144,400;1,9..144,600&display=swap');
+
+    :root {
+      --ci-blue: #1DA1D4;
+      --ci-blue-dark: #1789B5;
+      --ci-amber: #F2B35E;
+      --ci-charcoal: #3A4A54;
+      --ci-charcoal-deep: #2E3C44;
+      --ci-white: #ffffff;
+      --ci-light: #f5f7f8;
+      --ci-border: #e2e7ea;
+      --ci-text: #3A4A54;
+      --ci-text-light: #6B7D88;
+      --font-body: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      --font-display: 'Fraunces', Georgia, serif;
+      --page-max: 8.5in;
+      --page-pad: 0.75in;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { font-size: 16px; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+
+    body {
+      font-family: var(--font-body);
+      font-size: 0.925rem;
+      line-height: 1.65;
+      color: var(--ci-text);
+      background: #e8ecee;
+    }
+
+    .document {
+      max-width: var(--page-max);
+      margin: 0 auto;
+      background: var(--ci-white);
+      box-shadow: 0 4px 24px rgba(0,0,0,0.08);
+    }
+
+    /* ── HEADER ── */
+    .doc-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 1.25rem var(--page-pad);
+      background: var(--ci-charcoal);
+      border-bottom: 3px solid var(--ci-blue);
+    }
+    .doc-header img.logo { height: 34px; width: auto; }
+    .doc-header .meta { text-align: right; }
+    .doc-header .doc-type {
+      display: block;
+      font-size: 0.65rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.18em;
+      color: var(--ci-amber);
+    }
+    .doc-header .doc-date {
+      font-size: 0.8rem;
+      color: rgba(255,255,255,0.7);
+    }
+
+    /* ── CONTENT ── */
+    .doc-content { padding: 2rem var(--page-pad) 1.5rem; }
+
+    /* Title block */
+    .title-block {
+      margin-bottom: 1.75rem;
+      padding-bottom: 1.25rem;
+      border-bottom: 1px solid var(--ci-border);
+    }
+    .title-block .client-label {
+      font-size: 0.7rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      color: var(--ci-blue);
+      margin-bottom: 0.35rem;
+    }
+    .title-block h1 {
+      font-family: var(--font-display);
+      font-size: 1.6rem;
+      font-weight: 600;
+      color: var(--ci-charcoal);
+      line-height: 1.25;
+      margin-bottom: 0.25rem;
+    }
+    .title-block .meeting-info {
+      font-size: 0.85rem;
+      color: var(--ci-text-light);
+    }
+
+    /* Meeting meta grid */
+    .meeting-meta {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.75rem;
+      background: var(--ci-light);
+      padding: 1rem 1.25rem;
+      border-radius: 8px;
+      margin-bottom: 1.75rem;
+    }
+    .meeting-meta .meta-item .label {
+      font-size: 0.6rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--ci-text-light);
+      margin-bottom: 2px;
+    }
+    .meeting-meta .meta-item .value {
+      font-size: 0.85rem;
+      color: var(--ci-charcoal);
+    }
+
+    /* Exec summary callout */
+    .exec-summary {
+      border-left: 4px solid var(--ci-blue);
+      background: linear-gradient(135deg, rgba(29,161,212,0.04) 0%, rgba(242,179,94,0.03) 100%);
+      padding: 1rem 1.25rem;
+      margin-bottom: 1.75rem;
+      border-radius: 0 8px 8px 0;
+    }
+    .exec-summary p {
+      font-size: 0.9rem;
+      line-height: 1.7;
+    }
+
+    /* Section headings */
+    h2 {
+      font-family: var(--font-display);
+      font-size: 1.05rem;
+      font-weight: 600;
+      color: var(--ci-charcoal);
+      margin: 1.75rem 0 0.75rem;
+      padding-bottom: 0.4rem;
+      border-bottom: 2px solid var(--ci-light);
+    }
+    h2 .accent {
+      color: var(--ci-blue);
+    }
+
+    h3 {
+      font-size: 0.9rem;
+      font-weight: 600;
+      color: var(--ci-charcoal);
+      margin: 1.25rem 0 0.4rem;
+    }
+
+    p { margin-bottom: 0.75rem; }
+
+    /* Styled lists */
+    ul { list-style: none; padding: 0; margin: 0 0 1rem; }
+    li {
+      position: relative;
+      padding-left: 1.25rem;
+      margin-bottom: 0.5rem;
+      font-size: 0.9rem;
+    }
+    li::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 0.55em;
+      width: 6px;
+      height: 6px;
+      background: var(--ci-blue);
+      border-radius: 50%;
+    }
+    li strong { color: var(--ci-charcoal); }
+
+    /* Priority list with amber markers */
+    .priority-list li::before {
+      background: var(--ci-amber);
+      width: 8px;
+      height: 8px;
+      top: 0.45em;
+    }
+
+    /* Numbered theme cards */
+    .theme-card {
+      background: var(--ci-light);
+      border-radius: 8px;
+      padding: 1rem 1.25rem;
+      margin-bottom: 0.65rem;
+      border-left: 3px solid var(--ci-blue);
+    }
+    .theme-card.amber { border-left-color: var(--ci-amber); }
+    .theme-card .theme-label {
+      font-size: 0.65rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--ci-blue);
+      margin-bottom: 0.15rem;
+    }
+    .theme-card.amber .theme-label { color: var(--ci-amber); }
+    .theme-card .theme-title {
+      font-weight: 600;
+      font-size: 0.925rem;
+      color: var(--ci-charcoal);
+      margin-bottom: 0.25rem;
+    }
+    .theme-card p {
+      font-size: 0.85rem;
+      margin: 0;
+      color: var(--ci-text);
+    }
+
+    /* Action items */
+    .action-item {
+      display: flex;
+      gap: 0.75rem;
+      align-items: flex-start;
+      padding: 0.75rem 1rem;
+      background: var(--ci-light);
+      border-radius: 8px;
+      margin-bottom: 0.5rem;
+      font-size: 0.85rem;
+    }
+    .action-item .owner {
+      flex-shrink: 0;
+      min-width: 90px;
+      font-weight: 600;
+      color: var(--ci-blue);
+      font-size: 0.8rem;
+    }
+    .action-item .desc { flex-grow: 1; }
+    .action-item .timeline {
+      flex-shrink: 0;
+      font-size: 0.75rem;
+      color: var(--ci-text-light);
+      white-space: nowrap;
+    }
+
+    /* Approach cards */
+    .approach-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.75rem;
+      margin-bottom: 1rem;
+    }
+    .approach-card {
+      border-radius: 8px;
+      padding: 1.1rem 1.25rem;
+      font-size: 0.85rem;
+    }
+    .approach-card.primary {
+      background: linear-gradient(135deg, var(--ci-charcoal) 0%, var(--ci-charcoal-deep) 100%);
+      color: white;
+    }
+    .approach-card.secondary {
+      background: var(--ci-light);
+      border: 1px solid var(--ci-border);
+    }
+    .approach-card .card-label {
+      font-size: 0.6rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      margin-bottom: 0.25rem;
+    }
+    .approach-card.primary .card-label { color: var(--ci-amber); }
+    .approach-card.secondary .card-label { color: var(--ci-blue); }
+    .approach-card .card-title {
+      font-weight: 600;
+      font-size: 0.95rem;
+      margin-bottom: 0.35rem;
+    }
+    .approach-card.primary .card-title { color: white; }
+    .approach-card.secondary .card-title { color: var(--ci-charcoal); }
+    .approach-card p { margin: 0; line-height: 1.55; }
+    .approach-card.primary p { opacity: 0.9; }
+
+    /* Contact card */
+    .contact-card {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      padding: 1rem 1.25rem;
+      background: var(--ci-light);
+      border-radius: 8px;
+      margin-top: 1.25rem;
+    }
+    .contact-card img.avatar {
+      width: 56px;
+      height: 56px;
+      border-radius: 50%;
+      object-fit: cover;
+    }
+    .contact-card .info { flex-grow: 1; }
+    .contact-card .name { font-weight: 600; font-size: 0.9rem; color: var(--ci-charcoal); }
+    .contact-card .role { font-size: 0.8rem; color: var(--ci-text-light); margin-bottom: 2px; }
+    .contact-card .details { font-size: 0.8rem; }
+    .contact-card .details a { color: var(--ci-blue); text-decoration: none; }
+
+    /* ── FOOTER ── */
+    .doc-footer {
+      padding: 1.25rem var(--page-pad);
+      background: var(--ci-charcoal);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .doc-footer img.footer-logo { height: 28px; width: auto; }
+    .doc-footer .footer-text {
+      text-align: right;
+      color: rgba(255,255,255,0.7);
+      font-size: 0.75rem;
+      line-height: 1.5;
+    }
+    .doc-footer .footer-text .tagline {
+      font-family: var(--font-display);
+      font-style: italic;
+      color: rgba(255,255,255,0.9);
+      font-size: 0.85rem;
+    }
+
+    /* Confidential strip */
+    .confidential-strip {
+      padding: 0.4rem var(--page-pad);
+      background: var(--ci-charcoal-deep);
+      text-align: center;
+      font-size: 0.6rem;
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.15em;
+      color: rgba(255,255,255,0.35);
+    }
+
+    /* ── PRINT ── */
+    @media print {
+      html { font-size: 10pt; }
+      body { background: white; }
+      .document { box-shadow: none; max-width: none; }
+      .theme-card, .action-item, .approach-card, .contact-card { break-inside: avoid; }
+      .doc-footer { break-inside: avoid; }
+    }
+
+    @media screen and (max-width: 768px) {
+      :root { --page-pad: 1rem; }
+      .doc-header { flex-direction: column; gap: 0.75rem; }
+      .doc-header .meta { text-align: left; }
+      .meeting-meta { grid-template-columns: 1fr; }
+      .approach-grid { grid-template-columns: 1fr; }
+      .doc-footer { flex-direction: column; gap: 0.75rem; }
+      .doc-footer .footer-text { text-align: left; }
+    }
+    /* ── PASSWORD GATE ── */
+    .gate-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 1000;
+      background: var(--ci-charcoal);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .gate-overlay.hidden { display: none; }
+    .gate-box {
+      text-align: center;
+      max-width: 360px;
+      padding: 2.5rem 2rem;
+    }
+    .gate-box img { height: 48px; margin-bottom: 1.5rem; }
+    .gate-box .gate-label {
+      font-size: 0.65rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.18em;
+      color: var(--ci-amber);
+      margin-bottom: 0.5rem;
+    }
+    .gate-box .gate-title {
+      font-family: var(--font-display);
+      font-size: 1.2rem;
+      color: white;
+      margin-bottom: 1.5rem;
+      font-weight: 400;
+    }
+    .gate-box input {
+      width: 100%;
+      padding: 0.7rem 1rem;
+      font-family: var(--font-body);
+      font-size: 0.9rem;
+      border: 1px solid rgba(255,255,255,0.15);
+      border-radius: 6px;
+      background: rgba(255,255,255,0.08);
+      color: white;
+      outline: none;
+      text-align: center;
+      letter-spacing: 0.05em;
+      transition: border-color 0.2s;
+    }
+    .gate-box input::placeholder { color: rgba(255,255,255,0.3); }
+    .gate-box input:focus { border-color: var(--ci-blue); }
+    .gate-box input.error {
+      border-color: #e05252;
+      animation: shake 0.4s ease;
+    }
+    .gate-box .gate-hint {
+      font-size: 0.75rem;
+      color: rgba(255,255,255,0.35);
+      margin-top: 0.75rem;
+    }
+    @keyframes shake {
+      0%, 100% { transform: translateX(0); }
+      25% { transform: translateX(-6px); }
+      75% { transform: translateX(6px); }
+    }
+
+    .document { display: none; }
+    .document.visible { display: block; }
+  </style>
+</head>
+<body>
+
+  <!-- PASSWORD GATE -->
+  <div class="gate-overlay" id="gate">
+    <div class="gate-box">
+      <img src="assets/logos/logo-vector.png" alt="Commit Impact">
+      <div class="gate-label">Confidential Document</div>
+      <div class="gate-title">What We Heard</div>
+      <input type="password" id="gate-input" placeholder="Enter access code" autofocus>
+      <div class="gate-hint">Press Enter to continue</div>
+    </div>
+  </div>
+
+  <div class="document">
+
+    <!-- HEADER -->
+    <header class="doc-header">
+      <img class="logo" src="assets/logos/logo-vector.png" alt="Commit Impact">
+      <div class="meta">
+        <span class="doc-type">What We Heard</span>
+        <span class="doc-date">February 17, 2026</span>
+      </div>
+    </header>
+
+    <!-- CONTENT -->
+    <main class="doc-content">
+
+      <!-- Title -->
+      <div class="title-block">
+        <div class="client-label">CMT Infrastructure Professionals</div>
+        <h1>AI-Enabled Growth Engineering <br>Discovery Conversation</h1>
+        <p class="meeting-info">Initial Discovery &middot; February 2026 &middot; Quill Coffee House, Indianapolis, IN</p>
+      </div>
+
+      <!-- Meeting Meta -->
+      <div class="meeting-meta">
+        <div class="meta-item">
+          <div class="label">Date</div>
+          <div class="value">February 2026</div>
+        </div>
+        <div class="meta-item">
+          <div class="label">Location</div>
+          <div class="value">Quill Coffee House, Indianapolis, IN</div>
+        </div>
+        <div class="meta-item">
+          <div class="label">CMT Attendees</div>
+          <div class="value">Konner Dudley, Pursuits Group Manager</div>
+        </div>
+        <div class="meta-item">
+          <div class="label">Commit Impact</div>
+          <div class="value">Joel Austin, Founder</div>
+        </div>
+      </div>
+
+      <!-- Exec Summary -->
+      <div class="exec-summary">
+        <p>CMT is pursuing a firm-wide initiative to scale business development operations through AI-enabled automation. The Pursuits Group, led by Konner Dudley, is looking to double proposal output within existing team capacity — transforming how proposals, qualifications, and pursuit assets are generated across 25+ offices and five market verticals.</p>
+      </div>
+
+      <!-- What We Heard -->
+      <h2>What We <span class="accent">Heard</span></h2>
+      <p>During our conversation, you shared several key challenges shaping your current priorities:</p>
+
+      <div class="theme-card">
+        <div class="theme-label">Priority 1</div>
+        <div class="theme-title">Proposal Generation at Scale</div>
+        <p>Your team needs to 2x proposal output within the same hours. Current assets live in SharePoint and are queryable via Copilot, but results are read-only — requiring manual copy/paste into new documents. There's no generative layer, no templating engine, and no structured output pipeline to accelerate production.</p>
+      </div>
+
+      <div class="theme-card">
+        <div class="theme-label">Priority 2</div>
+        <div class="theme-title">The Governance Balance</div>
+        <p>You're navigating between two failure modes: a centralized model where your marketing team becomes the bottleneck for all doc generation (doesn't scale), and a decentralized model where 25+ offices generate content independently (inconsistent quality, no brand governance). The goal is a governed self-serve layer — guardrails your team controls, outputs the field can generate.</p>
+      </div>
+
+      <div class="theme-card amber">
+        <div class="theme-label">Priority 3</div>
+        <div class="theme-title">Resume &amp; Project Sheet Pipeline</div>
+        <p>The path from Deltek Vantage to usable proposal-ready content is broken. Prior approaches — including a custom build that was ultimately retired, and manual AI-assisted workflows — got closer but still can't produce structured, brand-compliant output at scale. Extracting usable content from legacy PDF assets remains the core unsolved problem.</p>
+      </div>
+
+      <div class="theme-card amber">
+        <div class="theme-label">Priority 4</div>
+        <div class="theme-title">Pursuit Intake &amp; Qualification</div>
+        <p>The workflow from opportunity identification through Deltek Vantage intake to Monday.com pipeline management is largely manual. Go/no-go decisions and pursuit kickoff processes present clear automation opportunities, including AI-powered RFP qualification and overnight opportunity monitoring.</p>
+      </div>
+
+      <!-- Your Goals -->
+      <h2>Your <span class="accent">Goals</span></h2>
+      <ul class="priority-list">
+        <li><strong>40% automation target</strong> across pursuit operations — a specific, internally validated benchmark your team is working toward</li>
+        <li><strong>2x proposal output in the same hours</strong> — the primary OKR driving this initiative</li>
+        <li><strong>Brand governance at scale</strong> — enabling field teams to generate compliant content without centralized bottlenecks</li>
+        <li><strong>Integration with existing stack</strong> — any solution must work within the Microsoft / Deltek / SharePoint ecosystem, not replace it</li>
+      </ul>
+
+      <!-- Suggested Approach -->
+      <h2>Suggested <span class="accent">Approach</span></h2>
+      <p>Based on what you shared, we see two paths forward — and they're not mutually exclusive:</p>
+
+      <div class="approach-grid">
+        <div class="approach-card primary">
+          <div class="card-label">Recommended Starting Point</div>
+          <div class="card-title">Constraint Sprint</div>
+          <p>Pick one constraint — proposal generation — and scope a standalone proof-of-concept. Define a clear success metric (e.g., "generate a compliant first-draft SOQ from existing SharePoint assets in under 15 minutes"). Validate in 3-4 weeks, then scale into the broader ecosystem.</p>
+        </div>
+        <div class="approach-card secondary">
+          <div class="card-label">Full Scope Option</div>
+          <div class="card-title">AI Enablement Roadmap</div>
+          <p>Map the full integration architecture across all five pain points — Deltek, SharePoint, OpenAsset, Monday.com — define the governance model, and deliver a phased implementation plan with clear decision gates at each stage.</p>
+        </div>
+      </div>
+
+      <p>Our recommendation: start with the sprint. It directly addresses your #1 priority, proves the model works with real output, and naturally scopes the larger roadmap as you validate the approach. You earn confidence in the partnership by shipping something that works first.</p>
+
+      <!-- Next Steps -->
+      <h2>Suggested <span class="accent">Next Steps</span></h2>
+
+      <div class="action-item">
+        <div class="owner">Commit Impact</div>
+        <div class="desc">Deliver scoped proposal for Constraint Sprint — proposal generation MVP with success criteria and timeline</div>
+        <div class="timeline">This Week</div>
+      </div>
+      <div class="action-item">
+        <div class="owner">CMT</div>
+        <div class="desc">Share sample proposal templates, SharePoint structure overview, and example pursuit workflow to inform sprint scoping</div>
+        <div class="timeline">This Week</div>
+      </div>
+      <div class="action-item">
+        <div class="owner">Joint</div>
+        <div class="desc">Schedule follow-up to review sprint scope and align on engagement structure</div>
+        <div class="timeline">Next Week</div>
+      </div>
+
+      <!-- Contact -->
+      <h2>Your Commit Impact <span class="accent">Contact</span></h2>
+      <div class="contact-card">
+        <img class="avatar" src="assets/team/joel2.png" alt="Joel Austin">
+        <div class="info">
+          <div class="name">Joel Austin</div>
+          <div class="role">Founder, Commit Impact</div>
+          <div class="details">
+            <a href="mailto:joel@commitimpact.com">joel@commitimpact.com</a>
+          </div>
+        </div>
+      </div>
+
+    </main>
+
+    <!-- FOOTER -->
+    <footer class="doc-footer">
+      <img class="footer-logo" src="assets/logos/logo-vector.png" alt="Commit Impact">
+      <div class="footer-text">
+        <div class="tagline">Commit to impact.</div>
+        commitimpact.com
+      </div>
+    </footer>
+    <div class="confidential-strip">Prepared exclusively for CMT Infrastructure Professionals &middot; Confidential</div>
+
+  </div>
+
+  <script>
+    const gate = document.getElementById('gate');
+    const input = document.getElementById('gate-input');
+    const doc = document.querySelector('.document');
+
+    input.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter') {
+        if (input.value === 'Quills') {
+          gate.classList.add('hidden');
+          doc.classList.add('visible');
+        } else {
+          input.classList.add('error');
+          input.value = '';
+          setTimeout(() => input.classList.remove('error'), 400);
+        }
+      }
+    });
+  </script>
+</body>
+</html>

@@ -3,13 +3,18 @@ import path from 'path';
 
 import {
   ASSISTANT_NAME,
+  CLAUDE_UPGRADE_MODEL,
+  DASHBOARD_PORT,
   DATA_DIR,
+  EMAIL_CHANNEL_ENABLED,
   IDLE_TIMEOUT,
   MAIN_GROUP_FOLDER,
   POLL_INTERVAL,
+  TELEGRAM_BOT_TOKEN,
   TRIGGER_PATTERN,
 } from './config.js';
-import { WhatsAppChannel } from './channels/whatsapp.js';
+import { EmailChannel } from './channels/email.js';
+import { TelegramChannel } from './channels/telegram.js';
 import {
   ContainerOutput,
   runContainerAgent,
@@ -17,6 +22,7 @@ import {
   writeTasksSnapshot,
 } from './container-runner.js';
 import { cleanupOrphans, ensureContainerRuntimeRunning } from './container-runtime.js';
+import { startDashboard } from './dashboard.js';
 import {
   getAllChats,
   getAllRegisteredGroups,
@@ -33,9 +39,10 @@ import {
   storeMessage,
 } from './db.js';
 import { GroupQueue } from './group-queue.js';
-import { startIpcWatcher } from './ipc.js';
+import { clearIpcSent, hasIpcSent, startIpcWatcher } from './ipc.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
 import { startSchedulerLoop } from './task-scheduler.js';
+import { appendUsage } from './usage-tracker.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
 
@@ -47,8 +54,8 @@ let sessions: Record<string, string> = {};
 let registeredGroups: Record<string, RegisteredGroup> = {};
 let lastAgentTimestamp: Record<string, string> = {};
 let messageLoopRunning = false;
+let mainChatJid: string | undefined;
 
-let whatsapp: WhatsAppChannel;
 const channels: Channel[] = [];
 const queue = new GroupQueue();
 
@@ -63,8 +70,13 @@ function loadState(): void {
   }
   sessions = getAllSessions();
   registeredGroups = getAllRegisteredGroups();
+  // Resolve main group's chatJid for managed containers to report upstream
+  const mainEntry = Object.entries(registeredGroups).find(
+    ([, g]) => g.folder === MAIN_GROUP_FOLDER,
+  );
+  mainChatJid = mainEntry?.[0];
   logger.info(
-    { groupCount: Object.keys(registeredGroups).length },
+    { groupCount: Object.keys(registeredGroups).length, mainChatJid: mainChatJid || 'NOT_FOUND' },
     'State loaded',
   );
 }
@@ -172,6 +184,9 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   let hadError = false;
   let outputSentToUser = false;
 
+  // Clear IPC-sent tracking for this chat so we can detect fresh sends
+  clearIpcSent(chatJid);
+
   const output = await runAgent(group, prompt, chatJid, async (result) => {
     // Streaming output callback — called for each agent result
     if (result.result) {
@@ -180,7 +195,17 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
       logger.info({ group: group.name }, `Agent output: ${raw.slice(0, 200)}`);
       if (text) {
-        await channel.sendMessage(chatJid, text);
+        // Suppress streaming delivery if IPC already sent a message to this
+        // chat. send_message is cross-group only, so ipcSent is only set when
+        // another group routes to this chat — streaming would be a duplicate.
+        if (hasIpcSent(chatJid)) {
+          logger.debug(
+            { group: group.name },
+            'Streaming output suppressed (IPC already delivered to this chat)',
+          );
+        } else {
+          await channel.sendMessage(chatJid, text);
+        }
         outputSentToUser = true;
       }
       // Only reset idle timer on actual results, not session-update markers (result: null)
@@ -223,7 +248,18 @@ async function runAgent(
   onOutput?: (output: ContainerOutput) => Promise<void>,
 ): Promise<'success' | 'error'> {
   const isMain = group.folder === MAIN_GROUP_FOLDER;
-  const sessionId = sessions[group.folder];
+  // Managed groups don't resume sessions — each email is a fresh turn.
+  // Resuming can crash if the previous session had different MCP tools.
+  const isManaged = chatJid.startsWith('managed:');
+  const sessionId = isManaged ? undefined : sessions[group.folder];
+
+  // Detect /opus trigger in message — upgrades this invocation to Opus
+  const opusPattern = /\/opus\b/i;
+  const useOpus = opusPattern.test(prompt);
+  if (useOpus) {
+    prompt = prompt.replace(opusPattern, '').trim();
+    logger.info({ group: group.name }, 'Opus model override detected');
+  }
 
   // Update tasks snapshot for container to read (filtered by group)
   const tasks = getAllTasks();
@@ -257,6 +293,18 @@ async function runAgent(
           sessions[group.folder] = output.newSessionId;
           setSession(group.folder, output.newSessionId);
         }
+        if (output.usage && (output.usage.input_tokens > 0 || output.usage.output_tokens > 0)) {
+          appendUsage({
+            timestamp: new Date().toISOString(),
+            groupFolder: group.folder,
+            model: output.model,
+            sessionId: sessions[group.folder],
+            input_tokens: output.usage.input_tokens,
+            output_tokens: output.usage.output_tokens,
+            cache_creation_input_tokens: output.usage.cache_creation_input_tokens,
+            cache_read_input_tokens: output.usage.cache_read_input_tokens,
+          });
+        }
         await onOutput(output);
       }
     : undefined;
@@ -270,8 +318,13 @@ async function runAgent(
         groupFolder: group.folder,
         chatJid,
         isMain,
+        ...(useOpus ? { model: CLAUDE_UPGRADE_MODEL } : {}),
+        // Give managed containers a path to report upstream to main
+        ...(!isMain && chatJid.startsWith('managed:') && mainChatJid
+          ? { mainChatJid }
+          : {}),
       },
-      (proc, containerName) => queue.registerProcess(chatJid, proc, containerName, group.folder),
+      (proc, containerName) => queue.registerProcess(chatJid, proc, containerName, group.folder, 'message', prompt.slice(0, 200)),
       wrappedOnOutput,
     );
 
@@ -362,6 +415,9 @@ async function startMessageLoop(): Promise<void> {
           const formatted = formatMessages(messagesToSend);
 
           if (queue.sendMessage(chatJid, formatted)) {
+            // Reset IPC-sent flag so a new user turn isn't suppressed by a
+            // send_message call Thomas made in a previous turn.
+            clearIpcSent(chatJid);
             logger.debug(
               { chatJid, count: messagesToSend.length },
               'Piped messages to active container',
@@ -404,6 +460,52 @@ function recoverPendingMessages(): void {
   }
 }
 
+/**
+ * Scan groups with managed_state_index.json and register them as managed groups.
+ * These groups get their own container for context-isolated email conversations.
+ */
+function registerManagedGroups(): void {
+  const groupsDir = path.join(DATA_DIR, '..', 'groups');
+  if (!fs.existsSync(groupsDir)) return;
+
+  const existingFolders = new Set(
+    Object.values(registeredGroups).map((g) => g.folder),
+  );
+
+  try {
+    const folders = fs.readdirSync(groupsDir, { withFileTypes: true });
+    for (const f of folders) {
+      if (!f.isDirectory()) continue;
+      const indexPath = path.join(groupsDir, f.name, 'managed_state_index.json');
+      if (!fs.existsSync(indexPath)) continue;
+
+      const managedJid = `managed:${f.name}`;
+      // Skip if this folder is already registered under any JID
+      if (existingFolders.has(f.name)) continue;
+
+      try {
+        const index = JSON.parse(fs.readFileSync(indexPath, 'utf-8'));
+        const name = index.contact_name || index.contact || f.name;
+        registerGroup(managedJid, {
+          name: `Managed: ${name}`,
+          folder: f.name,
+          trigger: '',
+          added_at: new Date().toISOString(),
+          requiresTrigger: false, // All messages trigger — no @Thomas needed
+        });
+        logger.info(
+          { folder: f.name, jid: managedJid },
+          'Auto-registered managed conversation group',
+        );
+      } catch {
+        // skip malformed index
+      }
+    }
+  } catch (err) {
+    logger.warn({ err }, 'Failed to scan for managed groups');
+  }
+}
+
 function ensureContainerSystemRunning(): void {
   ensureContainerRuntimeRunning();
   cleanupOrphans();
@@ -414,6 +516,9 @@ async function main(): Promise<void> {
   initDatabase();
   logger.info('Database initialized');
   loadState();
+
+  // Auto-register managed conversation groups so the message loop processes them
+  registerManagedGroups();
 
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
@@ -433,17 +538,60 @@ async function main(): Promise<void> {
     registeredGroups: () => registeredGroups,
   };
 
-  // Create and connect channels
-  whatsapp = new WhatsAppChannel(channelOpts);
-  channels.push(whatsapp);
-  await whatsapp.connect();
+  // Create and connect Telegram channel
+  if (!TELEGRAM_BOT_TOKEN) {
+    logger.error('TELEGRAM_BOT_TOKEN is required. Set it in .env and restart.');
+    process.exit(1);
+  }
+  const telegram = new TelegramChannel(TELEGRAM_BOT_TOKEN, channelOpts);
+  channels.push(telegram);
+  await telegram.connect();
+
+  // Create and connect Email channel (if enabled)
+  if (EMAIL_CHANNEL_ENABLED) {
+    const emailConfigPath = path.join(DATA_DIR, 'email-accounts.json');
+    if (fs.existsSync(emailConfigPath)) {
+      try {
+        const emailAccounts = JSON.parse(fs.readFileSync(emailConfigPath, 'utf-8'));
+
+        // Find the main group's JID for cross-channel notifications
+        const mainEntry = Object.entries(registeredGroups).find(
+          ([, g]) => g.folder === MAIN_GROUP_FOLDER,
+        );
+        const mainJid = mainEntry?.[0];
+
+        const email = new EmailChannel({
+          ...channelOpts,
+          notifyJid: mainJid,
+          notifySend: mainJid
+            ? async (jid, text) => {
+                // Route through Telegram channel for notifications
+                const tgChannel = findChannel(channels, jid);
+                if (tgChannel) await tgChannel.sendMessage(jid, text);
+              }
+            : undefined,
+        });
+        for (const account of emailAccounts) {
+          email.addAccount(account);
+        }
+        channels.push(email);
+        await email.connect();
+        logger.info('Email channel connected');
+      } catch (err) {
+        logger.error({ err }, 'Failed to start email channel');
+      }
+    } else {
+      logger.warn({ path: emailConfigPath }, 'EMAIL_CHANNEL_ENABLED=true but no email-accounts.json found');
+    }
+  }
 
   // Start subsystems (independently of connection handler)
   startSchedulerLoop({
     registeredGroups: () => registeredGroups,
     getSessions: () => sessions,
     queue,
-    onProcess: (groupJid, proc, containerName, groupFolder) => queue.registerProcess(groupJid, proc, containerName, groupFolder),
+    mainChatJid: () => mainChatJid,
+    onProcess: (groupJid, proc, containerName, groupFolder) => queue.registerProcess(groupJid, proc, containerName, groupFolder, 'scheduled'),
     sendMessage: async (jid, rawText) => {
       const channel = findChannel(channels, jid);
       if (!channel) {
@@ -460,14 +608,28 @@ async function main(): Promise<void> {
       if (!channel) throw new Error(`No channel for JID: ${jid}`);
       return channel.sendMessage(jid, text);
     },
+    injectMessage: (chatJid, text, senderName) => {
+      storeMessage({
+        id: `inject-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        chat_jid: chatJid,
+        sender: 'joel',
+        sender_name: senderName,
+        content: text,
+        timestamp: new Date().toISOString(),
+        is_from_me: false,
+      });
+      // Trigger the message loop to pick up the injected message
+      queue.enqueueMessageCheck(chatJid);
+    },
     registeredGroups: () => registeredGroups,
     registerGroup,
-    syncGroupMetadata: (force) => whatsapp?.syncGroupMetadata(force) ?? Promise.resolve(),
+    syncGroupMetadata: () => Promise.resolve(),
     getAvailableGroups,
     writeGroupsSnapshot: (gf, im, ag, rj) => writeGroupsSnapshot(gf, im, ag, rj),
   });
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();
+  startDashboard(queue, { port: DASHBOARD_PORT });
   startMessageLoop().catch((err) => {
     logger.fatal({ err }, 'Message loop crashed unexpectedly');
     process.exit(1);

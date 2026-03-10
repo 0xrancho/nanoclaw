@@ -19,6 +19,7 @@ import {
   updateTaskAfterRun,
 } from './db.js';
 import { GroupQueue } from './group-queue.js';
+import { clearIpcSent, hasIpcSent } from './ipc.js';
 import { logger } from './logger.js';
 import { RegisteredGroup, ScheduledTask } from './types.js';
 
@@ -28,6 +29,7 @@ export interface SchedulerDependencies {
   queue: GroupQueue;
   onProcess: (groupJid: string, proc: ChildProcess, containerName: string, groupFolder: string) => void;
   sendMessage: (jid: string, text: string) => Promise<void>;
+  mainChatJid?: () => string | undefined;
 }
 
 async function runTask(
@@ -103,7 +105,11 @@ async function runTask(
     }, TASK_CLOSE_DELAY_MS);
   };
 
+  // Clear IPC-sent tracking for this chat
+  clearIpcSent(task.chat_jid);
+
   try {
+    const resolvedMainJid = deps.mainChatJid?.();
     const output = await runContainerAgent(
       group,
       {
@@ -113,13 +119,18 @@ async function runTask(
         chatJid: task.chat_jid,
         isMain,
         isScheduledTask: true,
+        ...(!isMain && task.chat_jid.startsWith('managed:') && resolvedMainJid
+          ? { mainChatJid: resolvedMainJid }
+          : {}),
       },
       (proc, containerName) => deps.onProcess(task.chat_jid, proc, containerName, task.group_folder),
       async (streamedOutput: ContainerOutput) => {
         if (streamedOutput.result) {
           result = streamedOutput.result;
-          // Forward result to user (sendMessage handles formatting)
-          await deps.sendMessage(task.chat_jid, streamedOutput.result);
+          // Forward result to user — skip if agent already sent via IPC
+          if (!hasIpcSent(task.chat_jid)) {
+            await deps.sendMessage(task.chat_jid, streamedOutput.result);
+          }
           scheduleClose();
         }
         if (streamedOutput.status === 'success') {

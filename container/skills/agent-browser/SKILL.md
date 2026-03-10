@@ -157,3 +157,18 @@ agent-browser get text @e1  # Get product title
 agent-browser get attr @e2 href  # Get link URL
 agent-browser screenshot products.png
 ```
+
+## Tool Selection: Browser & Web Tools
+
+| Goal | Tool | When |
+|------|------|------|
+| Navigate a page, click, fill forms | agent-browser (Bash) | Quick, stateless, no schema needed |
+| Structured page extraction with schema | mcp__playwright__* | When you need typed output |
+| Screenshot / visual check | mcp__playwright__screenshot | Playwright preferred over agent-browser |
+| Scrape a single known URL | mcp__firecrawl__firecrawl_scrape | Faster than browser for public content |
+| Search + scrape multiple pages | mcp__firecrawl__firecrawl_search | Multi-source research |
+| Crawl a site for all URLs | mcp__firecrawl__firecrawl_map | Site mapping before targeted scrape |
+| Complex multi-step web research | mcp__firecrawl__firecrawl_agent | Autonomous; slow; use as last resort |
+| Anything unknown | /tool-finder | Let the skill resolve it |
+
+Rule: Prefer static/API tools (Firecrawl) over browser tools. Use browser only when JS rendering or interaction is required.

@@ -33,3 +33,22 @@ groups/global/*
 .nanoclaw/
 
 agents-sdk-docs
+
+# Runtime state (Thomas's work product — backed up separately)
+contacts/
+accounts/
+opportunities/
+context-dump/
+LBP/
+/randd/
+usage-report.jsonl
+
+# One-off assets
+*.png
+nanoclaw-diagram.html
+
+# External repos
+claude-talk-to-figma-mcp/
+
+# Local env
+.local/

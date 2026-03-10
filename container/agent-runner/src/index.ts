@@ -26,7 +26,9 @@ interface ContainerInput {
   chatJid: string;
   isMain: boolean;
   isScheduledTask?: boolean;
+  model?: string;
   secrets?: Record<string, string>;
+  mainChatJid?: string;
 }
 
 interface ContainerOutput {
@@ -34,6 +36,13 @@ interface ContainerOutput {
   result: string | null;
   newSessionId?: string;
   error?: string;
+  model?: string;
+  usage?: {
+    input_tokens: number;
+    output_tokens: number;
+    cache_creation_input_tokens?: number;
+    cache_read_input_tokens?: number;
+  };
 }
 
 interface SessionEntry {
@@ -389,12 +398,41 @@ async function runQuery(
   let lastAssistantUuid: string | undefined;
   let messageCount = 0;
   let resultCount = 0;
+  // Accumulate text from assistant messages so we can emit it even when
+  // result.result is null (happens when the agent's last action is a tool call).
+  let pendingAssistantText = '';
+
+  // Accumulate token usage across all messages
+  const usage = {
+    input_tokens: 0,
+    output_tokens: 0,
+    cache_creation_input_tokens: 0,
+    cache_read_input_tokens: 0,
+  };
 
   // Load global CLAUDE.md as additional system context (shared across all groups)
   const globalClaudeMdPath = '/workspace/global/CLAUDE.md';
   let globalClaudeMd: string | undefined;
+  const isManaged = containerInput.chatJid.startsWith('managed:');
   if (!containerInput.isMain && fs.existsSync(globalClaudeMdPath)) {
-    globalClaudeMd = fs.readFileSync(globalClaudeMdPath, 'utf-8');
+    let content = fs.readFileSync(globalClaudeMdPath, 'utf-8');
+    if (isManaged) {
+      // Strip Gmail section — managed containers don't have Gmail MCP
+      content = content.replace(/## Email \(Gmail\)[\s\S]*?(?=\n## |\n$|$)/, '');
+      // Append managed-container routing instructions
+      content += `
+
+## Managed Conversation — Output Routing
+
+You are running in a managed conversation container. Your output channels:
+
+1. **Your text response** (streaming output) → sent as an email reply to the contact. This is your ONLY way to reply. Write your response directly — no tool needed.
+2. **\`report_to_main\` tool** → sends an internal message to Joel/main (Telegram). Use for status updates, observations, blockers. Joel will NOT see your streaming output.
+
+You do NOT have Gmail, Calendar, or Drive tools in this container. Do not attempt to use them.
+Your text response IS the email reply. Write it directly as your output.`;
+    }
+    globalClaudeMd = content;
   }
 
   // Discover additional directories mounted at /workspace/extra/*
@@ -413,10 +451,15 @@ async function runQuery(
     log(`Additional directories: ${extraDirs.join(', ')}`);
   }
 
+  if (containerInput.model) {
+    log(`Using model: ${containerInput.model}`);
+  }
+
   for await (const message of query({
     prompt: stream,
     options: {
       cwd: '/workspace/group',
+      model: containerInput.model,
       additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
       resume: sessionId,
       resumeSessionAt: resumeAt,
@@ -431,7 +474,13 @@ async function runQuery(
         'TeamCreate', 'TeamDelete', 'SendMessage',
         'TodoWrite', 'ToolSearch', 'Skill',
         'NotebookEdit',
-        'mcp__nanoclaw__*'
+        'mcp__nanoclaw__*',
+        'mcp__gmail__*',
+        'mcp__gmail_joel__*',
+        'mcp__calendar__*',
+        'mcp__gdrive__*',
+        'mcp__firecrawl__*',
+        'mcp__playwright__*'
       ],
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
@@ -445,6 +494,60 @@ async function runQuery(
             NANOCLAW_CHAT_JID: containerInput.chatJid,
             NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
             NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
+            ...(containerInput.mainChatJid ? { NANOCLAW_MAIN_CHAT_JID: containerInput.mainChatJid } : {}),
+          },
+        },
+        // Managed containers don't get Gmail/Calendar/Drive — their email
+        // replies go through streaming output, not direct Gmail sends.
+        // Giving them Gmail causes them to send emails directly, bypassing
+        // the host's reply pipeline and leaking internal content.
+        ...(containerInput.chatJid.startsWith('managed:') ? {} : {
+          gmail: {
+            command: 'npx',
+            args: ['-y', '@gongrzhe/server-gmail-autoauth-mcp'],
+            env: {
+              GMAIL_OAUTH_PATH: '/home/node/.gmail-mcp/gcp-oauth.keys.json',
+              GMAIL_CREDENTIALS_PATH: '/home/node/.gmail-mcp/credentials.json',
+            },
+          },
+          gmail_joel: {
+            command: 'npx',
+            args: ['-y', '@gongrzhe/server-gmail-autoauth-mcp'],
+            env: {
+              GMAIL_OAUTH_PATH: '/home/node/.gmail-mcp-joel/gcp-oauth.keys.json',
+              GMAIL_CREDENTIALS_PATH: '/home/node/.gmail-mcp-joel/credentials.json',
+            },
+          },
+          calendar: {
+            command: 'npx',
+            args: ['-y', '@gongrzhe/server-calendar-autoauth-mcp'],
+            env: {
+              CALENDAR_OAUTH_PATH: '/home/node/.calendar-mcp/gcp-oauth.keys.json',
+              CALENDAR_CREDENTIALS_PATH: '/home/node/.calendar-mcp/credentials.json',
+            },
+          },
+          gdrive: {
+            command: 'npx',
+            args: ['-y', '@modelcontextprotocol/server-gdrive'],
+            env: {
+              GDRIVE_OAUTH_PATH: '/home/node/.gdrive-server-commitimpact/gcp-oauth.keys.json',
+              GDRIVE_CREDENTIALS_PATH: '/home/node/.gdrive-server-commitimpact/credentials.json',
+            },
+          },
+        }),
+        firecrawl: {
+          command: 'npx',
+          args: ['-y', 'firecrawl-mcp'],
+          env: {
+            FIRECRAWL_API_KEY: containerInput.secrets?.FIRECRAWL_API_KEY ?? process.env.FIRECRAWL_API_KEY ?? '',
+          },
+        },
+        playwright: {
+          command: 'npx',
+          args: ['-y', '@playwright/mcp@latest', '--browser', 'chromium'],
+          env: {
+            PLAYWRIGHT_BROWSERS_PATH: '0',
+            PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH: '/usr/bin/chromium',
           },
         },
       },
@@ -458,8 +561,31 @@ async function runQuery(
     const msgType = message.type === 'system' ? `system/${(message as { subtype?: string }).subtype}` : message.type;
     log(`[msg #${messageCount}] type=${msgType}`);
 
-    if (message.type === 'assistant' && 'uuid' in message) {
-      lastAssistantUuid = (message as { uuid: string }).uuid;
+    if (message.type === 'assistant') {
+      if ('uuid' in message) {
+        lastAssistantUuid = (message as { uuid: string }).uuid;
+      }
+      // Extract text content from assistant messages
+      const content = (message as { message?: { content?: Array<{ type: string; text?: string }> } }).message?.content;
+      if (content) {
+        const textParts = content
+          .filter(c => c.type === 'text' && c.text)
+          .map(c => c.text!);
+        if (textParts.length > 0) {
+          pendingAssistantText += (pendingAssistantText ? '\n' : '') + textParts.join('\n');
+        }
+      }
+    }
+
+    // Accumulate token usage from assistant messages
+    if ('usage' in message) {
+      const msgUsage = (message as { usage?: { input_tokens?: number; output_tokens?: number; cache_creation_input_tokens?: number; cache_read_input_tokens?: number } }).usage;
+      if (msgUsage) {
+        usage.input_tokens += msgUsage.input_tokens || 0;
+        usage.output_tokens += msgUsage.output_tokens || 0;
+        usage.cache_creation_input_tokens += msgUsage.cache_creation_input_tokens || 0;
+        usage.cache_read_input_tokens += msgUsage.cache_read_input_tokens || 0;
+      }
     }
 
     if (message.type === 'system' && message.subtype === 'init') {
@@ -474,13 +600,24 @@ async function runQuery(
 
     if (message.type === 'result') {
       resultCount++;
-      const textResult = 'result' in message ? (message as { result?: string }).result : null;
-      log(`Result #${resultCount}: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`);
+      let textResult = 'result' in message ? (message as { result?: string }).result : null;
+      // Fall back to accumulated assistant text when the SDK result is null
+      // (happens when the agent's last action was a tool call, not text)
+      if (!textResult && pendingAssistantText) {
+        textResult = pendingAssistantText;
+        log(`Result #${resultCount}: subtype=${message.subtype} (using accumulated assistant text: ${textResult.slice(0, 200)})`);
+      } else {
+        log(`Result #${resultCount}: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`);
+      }
       writeOutput({
         status: 'success',
         result: textResult || null,
-        newSessionId
+        newSessionId,
+        model: containerInput.model,
+        usage: (usage.input_tokens > 0 || usage.output_tokens > 0) ? { ...usage } : undefined,
       });
+      // Reset accumulated text for next turn
+      pendingAssistantText = '';
     }
   }
 
@@ -512,6 +649,15 @@ async function main(): Promise<void> {
   const sdkEnv: Record<string, string | undefined> = { ...process.env };
   for (const [key, value] of Object.entries(containerInput.secrets || {})) {
     sdkEnv[key] = value;
+  }
+
+  // Tool API keys: expose to process.env so CLI tools (apollo-io-cli, etc.)
+  // can read them from Bash subprocesses. These are tool credentials, not secrets.
+  const TOOL_ENV_KEYS = ['APOLLO_API_KEY', 'FIRECRAWL_API_KEY'];
+  for (const key of TOOL_ENV_KEYS) {
+    if (containerInput.secrets?.[key]) {
+      process.env[key] = containerInput.secrets[key];
+    }
   }
 
   const __dirname = path.dirname(fileURLToPath(import.meta.url));

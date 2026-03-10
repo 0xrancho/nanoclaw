@@ -8,6 +8,8 @@ import os from 'os';
 import path from 'path';
 
 import {
+  CLAUDE_MODEL,
+  CLAUDE_ROUTER_MODEL,
   CONTAINER_IMAGE,
   CONTAINER_MAX_OUTPUT_SIZE,
   CONTAINER_TIMEOUT,
@@ -42,7 +44,9 @@ export interface ContainerInput {
   chatJid: string;
   isMain: boolean;
   isScheduledTask?: boolean;
+  model?: string;
   secrets?: Record<string, string>;
+  mainChatJid?: string;
 }
 
 export interface ContainerOutput {
@@ -50,6 +54,13 @@ export interface ContainerOutput {
   result: string | null;
   newSessionId?: string;
   error?: string;
+  model?: string;
+  usage?: {
+    input_tokens: number;
+    output_tokens: number;
+    cache_creation_input_tokens?: number;
+    cache_read_input_tokens?: number;
+  };
 }
 
 interface VolumeMount {
@@ -143,6 +154,52 @@ function buildVolumeMounts(
     readonly: false,
   });
 
+  // Gmail credentials directory (token refresh needs write access)
+  // Email groups get their own credentials from data/email-credentials/.
+  // All other groups get thomas@commitimpact.com credentials — his identity
+  // should be universally available. Fall back to ~/.gmail-mcp if not present.
+  let gmailDir: string | null = null;
+  if (group.folder.endsWith('-email')) {
+    // Look for matching email credentials (e.g., "thomas-email" → "thomas")
+    const accountName = group.folder.replace(/-email$/, '');
+    const emailCredsDir = path.join(DATA_DIR, 'email-credentials', accountName);
+    if (fs.existsSync(emailCredsDir)) {
+      gmailDir = emailCredsDir;
+    }
+  }
+  if (!gmailDir) {
+    // Thomas's identity is the default for all containers
+    const thomasCredsDir = path.join(DATA_DIR, 'email-credentials', 'thomas');
+    if (fs.existsSync(thomasCredsDir)) {
+      gmailDir = thomasCredsDir;
+    }
+  }
+  if (!gmailDir) {
+    const defaultGmailDir = path.join(homeDir, '.gmail-mcp');
+    if (fs.existsSync(defaultGmailDir)) {
+      gmailDir = defaultGmailDir;
+    }
+  }
+  if (gmailDir) {
+    mounts.push({
+      hostPath: gmailDir,
+      containerPath: '/home/node/.gmail-mcp',
+      readonly: false,
+    });
+  }
+
+  // Second Gmail account (joel@commitimpact.com) — mounted for all groups that
+  // might need cross-inbox access (main, thomas-email). The gmail_joel MCP server
+  // reads from this path; it will simply fail to start if the dir isn't mounted.
+  const joelCredsDir = path.join(DATA_DIR, 'email-credentials', 'joel-commit');
+  if (fs.existsSync(joelCredsDir)) {
+    mounts.push({
+      hostPath: joelCredsDir,
+      containerPath: '/home/node/.gmail-mcp-joel',
+      readonly: false,
+    });
+  }
+
   // Per-group IPC namespace: each group gets its own IPC directory
   // This prevents cross-group privilege escalation via IPC
   const groupIpcDir = path.join(DATA_DIR, 'ipc', group.folder);
@@ -155,12 +212,12 @@ function buildVolumeMounts(
     readonly: false,
   });
 
-  // Mount agent-runner source from host — recompiled on container startup.
-  // Bypasses sticky build cache for code changes.
-  const agentRunnerSrc = path.join(projectRoot, 'container', 'agent-runner', 'src');
+  // Mount pre-compiled agent-runner dist from host.
+  // Host compiles once; containers start instantly without TSC overhead.
+  const agentRunnerDist = path.join(projectRoot, 'container', 'agent-runner', 'dist');
   mounts.push({
-    hostPath: agentRunnerSrc,
-    containerPath: '/app/src',
+    hostPath: agentRunnerDist,
+    containerPath: '/app/dist',
     readonly: true,
   });
 
@@ -182,7 +239,15 @@ function buildVolumeMounts(
  * Secrets are never written to disk or mounted as files.
  */
 function readSecrets(): Record<string, string> {
-  return readEnvFile(['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY']);
+  return readEnvFile([
+    'CLAUDE_CODE_OAUTH_TOKEN',
+    'ANTHROPIC_API_KEY',
+    'FIRECRAWL_API_KEY',
+    'APOLLO_API_KEY',
+    'MASTER_COMMIT_PAT',
+    'NETLIFY_AUTH_TOKEN',
+    'GH_PAT',
+  ]);
 }
 
 function buildContainerArgs(mounts: VolumeMount[], containerName: string): string[] {
@@ -264,6 +329,12 @@ export async function runContainerAgent(
     let stderr = '';
     let stdoutTruncated = false;
     let stderrTruncated = false;
+
+    // All groups run on CLAUDE_MODEL (Sonnet) by default.
+    // Explicit model override (e.g. /opus trigger) is preserved.
+    if (!input.model) {
+      input.model = CLAUDE_MODEL;
+    }
 
     // Pass secrets via stdin (never written to disk or mounted as files)
     input.secrets = readSecrets();

@@ -9,6 +9,10 @@ import { readEnvFile } from './env.js';
 const envConfig = readEnvFile([
   'ASSISTANT_NAME',
   'ASSISTANT_HAS_OWN_NUMBER',
+  'CLAUDE_MODEL',
+  'CLAUDE_ROUTER_MODEL',
+  'TELEGRAM_BOT_TOKEN',
+  'EMAIL_CHANNEL_ENABLED',
 ]);
 
 export const ASSISTANT_NAME =
@@ -58,8 +62,10 @@ function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+// Matches assistant name anywhere in the message (with or without @).
+// E.g. "Thomas what do you think?" or "@Thomas check this"
 export const TRIGGER_PATTERN = new RegExp(
-  `^@${escapeRegex(ASSISTANT_NAME)}\\b`,
+  `@?${escapeRegex(ASSISTANT_NAME)}\\b`,
   'i',
 );
 
@@ -67,3 +73,19 @@ export const TRIGGER_PATTERN = new RegExp(
 // Uses system timezone by default
 export const TIMEZONE =
   process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+export const CLAUDE_MODEL =
+  process.env.CLAUDE_MODEL || envConfig.CLAUDE_MODEL || 'claude-sonnet-4-6';
+export const CLAUDE_ROUTER_MODEL =
+  process.env.CLAUDE_ROUTER_MODEL || envConfig.CLAUDE_ROUTER_MODEL || 'claude-opus-4-6';
+export const CLAUDE_UPGRADE_MODEL =
+  process.env.CLAUDE_UPGRADE_MODEL || envConfig.CLAUDE_UPGRADE_MODEL || 'claude-opus-4-6';
+export const TELEGRAM_BOT_TOKEN =
+  process.env.TELEGRAM_BOT_TOKEN || envConfig.TELEGRAM_BOT_TOKEN || '';
+export const EMAIL_CHANNEL_ENABLED =
+  (process.env.EMAIL_CHANNEL_ENABLED || envConfig.EMAIL_CHANNEL_ENABLED || 'false') === 'true';
+
+export const DASHBOARD_PORT = parseInt(
+  process.env.DASHBOARD_PORT || '3001',
+  10,
+);

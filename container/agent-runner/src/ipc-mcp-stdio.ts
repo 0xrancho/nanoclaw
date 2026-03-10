@@ -19,6 +19,8 @@ const TASKS_DIR = path.join(IPC_DIR, 'tasks');
 const chatJid = process.env.NANOCLAW_CHAT_JID!;
 const groupFolder = process.env.NANOCLAW_GROUP_FOLDER!;
 const isMain = process.env.NANOCLAW_IS_MAIN === '1';
+const mainChatJid = process.env.NANOCLAW_MAIN_CHAT_JID || '';
+const isManaged = chatJid.startsWith('managed:');
 
 function writeIpcFile(dir: string, data: object): string {
   fs.mkdirSync(dir, { recursive: true });
@@ -39,28 +41,63 @@ const server = new McpServer({
   version: '1.0.0',
 });
 
-server.tool(
-  'send_message',
-  "Send a message to the user or group immediately while you're still running. Use this for progress updates or to send multiple messages. You can call this multiple times. Note: when running as a scheduled task, your final output is NOT sent to the user — use this tool if you need to communicate with the user or group.",
-  {
-    text: z.string().describe('The message text to send'),
-    sender: z.string().optional().describe('Your role/identity name (e.g. "Researcher"). When set, messages appear from a dedicated bot in Telegram.'),
-  },
-  async (args) => {
-    const data: Record<string, string | undefined> = {
-      type: 'message',
-      chatJid,
-      text: args.text,
-      sender: args.sender || undefined,
-      groupFolder,
-      timestamp: new Date().toISOString(),
-    };
+// Managed groups get report_to_main instead of send_message.
+// send_message targets the container's own chatJid which for managed groups
+// loops back as an email to the external contact — never useful.
+if (!isManaged) {
+  server.tool(
+    'send_message',
+    "Send a message to a DIFFERENT group or chat — cross-group messaging only. Do NOT use this for your own chat. Your streaming output is always delivered automatically and is the correct delivery path for your responses. Typing indicators are already shown while you work, so acks and progress updates in your own chat create duplicate messages. Use this tool only when you need to deliver a message to a group other than the one you are currently serving.",
+    {
+      text: z.string().describe('The message text to send'),
+      sender: z.string().optional().describe('Your role/identity name (e.g. "Researcher"). When set, messages appear from a dedicated bot in Telegram.'),
+    },
+    async (args) => {
+      const data: Record<string, string | undefined> = {
+        type: 'message',
+        chatJid,
+        text: args.text,
+        sender: args.sender || undefined,
+        groupFolder,
+        timestamp: new Date().toISOString(),
+      };
 
-    writeIpcFile(MESSAGES_DIR, data);
+      writeIpcFile(MESSAGES_DIR, data);
 
-    return { content: [{ type: 'text' as const, text: 'Message sent.' }] };
-  },
-);
+      return { content: [{ type: 'text' as const, text: 'Message sent.' }] };
+    },
+  );
+}
+
+// Only register report_to_main for managed (non-main) groups that have a main JID
+if (isManaged && mainChatJid) {
+  server.tool(
+    'report_to_main',
+    `Send an internal report to Joel/main. Use this for observations, status updates, strategic notes, or anything that should NOT go to the external contact. Your streaming output and send_message go to the external contact — this is the ONLY way to communicate internally.
+
+Examples of what to report:
+• "Jeremy confirmed budget range $X-$Y, moving to Round 2"
+• "Contact seems disengaged — may need Joel to follow up directly"
+• "Elicitation complete, ready for proposal draft"
+• "Blocked: contact asked a question outside my scope"`,
+    {
+      text: z.string().describe('The internal report text (only Joel/main will see this)'),
+    },
+    async (args) => {
+      const data = {
+        type: 'report_to_main',
+        chatJid: mainChatJid,
+        text: `📋 [${groupFolder}] ${args.text}`,
+        sourceGroup: groupFolder,
+        timestamp: new Date().toISOString(),
+      };
+
+      writeIpcFile(MESSAGES_DIR, data);
+
+      return { content: [{ type: 'text' as const, text: 'Report sent to main.' }] };
+    },
+  );
+}
 
 server.tool(
   'schedule_task',
@@ -139,6 +176,52 @@ SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
 
     return {
       content: [{ type: 'text' as const, text: `Task scheduled (${filename}): ${args.schedule_type} - ${args.schedule_value}` }],
+    };
+  },
+);
+
+server.tool(
+  'dispatch_task',
+  `(Main group only) Dispatch a task to run IMMEDIATELY in a subgroup's container. The subgroup runs on Sonnet — use this to delegate execution work.
+
+This is your primary delegation mechanism. You (Opus) should reason, plan, and coordinate. Subgroups (Sonnet) should execute.
+
+WHEN TO DISPATCH:
+• Web research, content generation, file operations → dispatch to research group
+• Arthur & Archie client work, agenticforms → dispatch to a-and-a group
+• Newsletter, Indy Praxis community work → dispatch to praxis group
+• Cross-system work needing Gmail + CRM + multiple tools → keep in main
+
+The task runs as a full agent with all tools. Output is sent back to the main Telegram chat.
+Include ALL necessary context in the prompt — the subgroup has no memory of your current conversation.`,
+  {
+    prompt: z.string().describe('Complete instructions for the subgroup agent. Include all context needed — the agent has no memory of the current conversation.'),
+    target_group_jid: z.string().describe('JID of the target group (e.g., "internal:research", "internal:a-and-a", "internal:praxis")'),
+  },
+  async (args) => {
+    if (!isMain) {
+      return {
+        content: [{ type: 'text' as const, text: 'Only the main group can dispatch tasks to other groups.' }],
+        isError: true,
+      };
+    }
+
+    // Schedule as "once" task running immediately
+    const data = {
+      type: 'schedule_task',
+      prompt: args.prompt,
+      schedule_type: 'once',
+      schedule_value: new Date().toISOString(),
+      context_mode: 'isolated',
+      targetJid: args.target_group_jid,
+      createdBy: groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+
+    const filename = writeIpcFile(TASKS_DIR, data);
+
+    return {
+      content: [{ type: 'text' as const, text: `Task dispatched to ${args.target_group_jid} (${filename}). It will run immediately on Sonnet.` }],
     };
   },
 );
@@ -235,6 +318,44 @@ server.tool(
     writeIpcFile(TASKS_DIR, data);
 
     return { content: [{ type: 'text' as const, text: `Task ${args.task_id} cancellation requested.` }] };
+  },
+);
+
+server.tool(
+  'inject_context',
+  `(Main group only) Send feedback or context to a managed conversation container. The message is injected into the managed group's message queue — if a container is active, it receives the message immediately. If not, it triggers a new container run.
+
+Use this when Joel wants to:
+• Give feedback on a managed conversation response ("too formal, adjust tone")
+• Add context the managed agent should know ("Jeremy mentioned X in a call")
+• Redirect the conversation ("pivot to discussing timeline")
+
+The managed container receives this as a user message in its prompt and can act on it.`,
+  {
+    target_group_jid: z.string().describe('The managed group JID (e.g., "managed:retrofit-design")'),
+    text: z.string().describe('The feedback or context to inject'),
+  },
+  async (args) => {
+    if (!isMain) {
+      return {
+        content: [{ type: 'text' as const, text: 'Only the main group can inject context into managed conversations.' }],
+        isError: true,
+      };
+    }
+
+    const data = {
+      type: 'inject_context',
+      targetJid: args.target_group_jid,
+      text: args.text,
+      sourceGroup: groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+
+    writeIpcFile(MESSAGES_DIR, data);
+
+    return {
+      content: [{ type: 'text' as const, text: `Context injected into ${args.target_group_jid}. The managed container will process it.` }],
+    };
   },
 );
 

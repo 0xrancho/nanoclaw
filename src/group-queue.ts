@@ -1,8 +1,9 @@
-import { ChildProcess } from 'child_process';
+import { ChildProcess, exec } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
 import { DATA_DIR, MAX_CONCURRENT_CONTAINERS } from './config.js';
+import { stopContainer } from './container-runtime.js';
 import { logger } from './logger.js';
 
 interface QueuedTask {
@@ -24,6 +25,21 @@ interface GroupState {
   containerName: string | null;
   groupFolder: string | null;
   retryCount: number;
+  invocationSource: string | null;
+  contextPreview: string | null;
+}
+
+export interface GroupStatusSnapshot {
+  groupJid: string;
+  groupFolder: string | null;
+  active: boolean;
+  isTaskContainer: boolean;
+  idleWaiting: boolean;
+  containerName: string | null;
+  invocationSource: string | null;
+  contextPreview: string | null;
+  pendingTaskCount: number;
+  pendingMessages: boolean;
 }
 
 export class GroupQueue {
@@ -47,6 +63,8 @@ export class GroupQueue {
         containerName: null,
         groupFolder: null,
         retryCount: 0,
+        invocationSource: null,
+        contextPreview: null,
       };
       this.groups.set(groupJid, state);
     }
@@ -123,11 +141,20 @@ export class GroupQueue {
     );
   }
 
-  registerProcess(groupJid: string, proc: ChildProcess, containerName: string, groupFolder?: string): void {
+  registerProcess(
+    groupJid: string,
+    proc: ChildProcess,
+    containerName: string,
+    groupFolder?: string,
+    invocationSource?: string,
+    contextPreview?: string,
+  ): void {
     const state = this.getGroup(groupJid);
     state.process = proc;
     state.containerName = containerName;
     if (groupFolder) state.groupFolder = groupFolder;
+    if (invocationSource !== undefined) state.invocationSource = invocationSource;
+    if (contextPreview !== undefined) state.contextPreview = contextPreview;
   }
 
   /**
@@ -214,6 +241,8 @@ export class GroupQueue {
       state.process = null;
       state.containerName = null;
       state.groupFolder = null;
+      state.invocationSource = null;
+      state.contextPreview = null;
       this.activeCount--;
       this.drainGroup(groupJid);
     }
@@ -241,6 +270,8 @@ export class GroupQueue {
       state.process = null;
       state.containerName = null;
       state.groupFolder = null;
+      state.invocationSource = null;
+      state.contextPreview = null;
       this.activeCount--;
       this.drainGroup(groupJid);
     }
@@ -316,6 +347,38 @@ export class GroupQueue {
       }
       // If neither pending, skip this group
     }
+  }
+
+  cancelGroup(groupJid: string): boolean {
+    const state = this.groups.get(groupJid);
+    if (!state || !state.active || !state.containerName) return false;
+
+    exec(stopContainer(state.containerName), { timeout: 15000 }, (err) => {
+      if (err) {
+        logger.warn({ groupJid, err }, 'Cancel: graceful stop failed');
+      }
+    });
+
+    return true;
+  }
+
+  getStatus(): GroupStatusSnapshot[] {
+    const snapshots: GroupStatusSnapshot[] = [];
+    for (const [groupJid, state] of this.groups) {
+      snapshots.push({
+        groupJid,
+        groupFolder: state.groupFolder,
+        active: state.active,
+        isTaskContainer: state.isTaskContainer,
+        idleWaiting: state.idleWaiting,
+        containerName: state.containerName,
+        invocationSource: state.invocationSource,
+        contextPreview: state.contextPreview,
+        pendingTaskCount: state.pendingTasks.length,
+        pendingMessages: state.pendingMessages,
+      });
+    }
+    return snapshots;
   }
 
   async shutdown(_gracePeriodMs: number): Promise<void> {

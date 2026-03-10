@@ -162,12 +162,15 @@ case "$METHOD" in
       });
     " >> "$LOG_FILE" 2>&1
 
-    # Open in browser (macOS)
+    # Open in browser (macOS: open, Linux: xdg-open)
     if command -v open >/dev/null 2>&1; then
       open "$PROJECT_ROOT/store/qr-auth.html"
       log "Opened QR auth page in browser"
+    elif command -v xdg-open >/dev/null 2>&1; then
+      xdg-open "$PROJECT_ROOT/store/qr-auth.html" >> "$LOG_FILE" 2>&1 &
+      log "Opened QR auth page in browser (xdg-open)"
     else
-      log "WARNING: 'open' command not found, cannot open browser"
+      log "WARNING: no browser opener found, QR saved to store/qr-auth.html"
     fi
 
     # Poll for completion (120s, 2s intervals)

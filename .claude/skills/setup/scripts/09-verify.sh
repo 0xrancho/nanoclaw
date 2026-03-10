@@ -72,7 +72,18 @@ log "WhatsApp auth: $WHATSAPP_AUTH"
 # 5. Check registered groups (in SQLite — the JSON file gets migrated away on startup)
 REGISTERED_GROUPS=0
 if [ -f "$PROJECT_ROOT/store/messages.db" ]; then
-  REGISTERED_GROUPS=$(sqlite3 "$PROJECT_ROOT/store/messages.db" "SELECT COUNT(*) FROM registered_groups" 2>/dev/null || echo "0")
+  if command -v sqlite3 >/dev/null 2>&1; then
+    REGISTERED_GROUPS=$(sqlite3 "$PROJECT_ROOT/store/messages.db" "SELECT COUNT(*) FROM registered_groups" 2>/dev/null || echo "0")
+  else
+    REGISTERED_GROUPS=$(node -e "
+      try {
+        const Database = require('better-sqlite3');
+        const db = new Database('$PROJECT_ROOT/store/messages.db');
+        const row = db.prepare('SELECT COUNT(*) as c FROM registered_groups').get();
+        process.stdout.write(String(row.c));
+      } catch(e) { process.stdout.write('0'); }
+    " 2>/dev/null || echo "0")
+  fi
 fi
 log "Registered groups: $REGISTERED_GROUPS"
 

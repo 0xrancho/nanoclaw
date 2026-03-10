@@ -54,13 +54,14 @@ async function connectSocket(phoneNumber?: string, isReconnect = false): Promise
   }
 
   const sock = makeWASocket({
+    version: [2, 3000, 1034074495],
     auth: {
       creds: state.creds,
       keys: makeCacheableSignalKeyStore(state.keys, logger),
     },
     printQRInTerminal: false,
     logger,
-    browser: Browsers.macOS('Chrome'),
+    browser: ['NanoClaw', 'Chrome', '22.04.4'],
   });
 
   if (usePairingCode && phoneNumber && !state.creds.me) {

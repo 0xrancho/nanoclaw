@@ -1,0 +1,17 @@
+skill: provision-mcp
+version: 1.0.0
+description: "Autonomous MCP server discovery, validation, and installation"
+core_version: 0.1.0
+adds:
+  - .claude/skills/provision-mcp/SKILL.md
+  - workspace/group/mcp-servers.md
+modifies: []
+structured:
+  npm_dependencies:
+    add-mcp: "latest"
+  env_additions: []
+  global_tools:
+    - add-mcp
+conflicts: []
+depends: []
+test: "echo 'Provision-MCP skill loaded. No automated tests - validation happens during runtime.'"

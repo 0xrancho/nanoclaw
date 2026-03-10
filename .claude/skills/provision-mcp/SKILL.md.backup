@@ -1,0 +1,604 @@
+---
+name: provision-mcp
+description: Automatically discover, validate, and install MCP servers when current tools are insufficient. Use when the agent needs capabilities beyond existing tools (e.g., "I need to interact with Linear", "Can you check my calendar?"). Handles search, security validation, installation via add-mcp CLI, and testing.
+---
+
+# MCP Server Provisioning
+
+Autonomously provision new MCP servers when tasks require capabilities not available in the current toolkit. This skill should be invoked **proactively** when the agent identifies a capability gap, not just when explicitly requested.
+
+## Core Principle
+
+**When you can't do something → find and install the tool that can.**
+
+Don't tell the user "I don't have access to X" — provision the MCP server that provides X, validate it's safe, install it, test it, and complete the task.
+
+## When to Use This Skill
+
+### Proactive Triggers (Auto-invoke)
+- User asks to interact with a service you can't access (Linear, Notion, Calendar, Slack, etc.)
+- Task requires file operations beyond basic read/write (image processing, PDF manipulation, etc.)
+- Need specialized search capabilities (vector search, semantic search)
+- Require data transformation tools (JSON processing, CSV operations)
+- Need authentication flows you can't handle
+
+### Explicit Triggers
+- User says "install an MCP server for X"
+- User asks "can you add support for Y?"
+- Following up on previous capability gaps
+
+### Do NOT Use When
+- Existing tools can accomplish the task (check first!)
+- User explicitly forbids new installations
+- Task is conversational/informational only
+
+## Workflow
+
+### Phase 1: Capability Gap Analysis
+
+**1.1 Identify the Need**
+- What capability is missing?
+- What specific operations are needed? (read-only, write, both)
+- Any constraints? (group permissions, security requirements)
+
+**Example:**
+```
+User: "Create a Linear ticket for this bug"
+Gap: No Linear API access
+Operations: Write (create issue), potentially read (search projects)
+```
+
+**1.2 Check Existing Tools First**
+Before provisioning, verify the capability truly doesn't exist:
+- Review available MCP servers in Claude Code settings
+- Check if a similar tool can accomplish the task
+- Consider if bash/web tools can substitute
+
+**Only proceed if the gap is real.**
+
+### Phase 2: Discovery
+
+**2.1 Search MCP Registries**
+
+Query multiple registries in parallel for relevant servers:
+
+**Primary Registries (2026):**
+- **Smithery.ai** - Main registry, hosted and local servers
+- **LobeHub MCP Directory** - Community-curated collection
+- **MCP.so** - Search-focused directory
+- **GitHub smithery-ai/reference-servers** - Official examples
+
+**Search Strategy:**
+1. Use specific service names ("Linear MCP", "Google Calendar MCP")
+2. Use capability keywords ("issue tracking MCP", "calendar integration MCP")
+3. Check official sources (e.g., company-maintained servers)
+
+**Search Commands:**
+```bash
+# Web search across registries
+# Example: "Linear MCP server smithery lobehub 2026"
+
+# GitHub search for official servers
+# Example: search for "linear-mcp-server" org:company-name
+```
+
+**2.2 Candidate Evaluation**
+
+For each candidate, gather:
+- **Source**: GitHub repo URL, npm package name, or registry listing
+- **Maintainer**: Official (company-maintained) vs community
+- **Popularity**: Stars, downloads, recent activity
+- **Documentation**: Quality of setup instructions
+- **License**: Must be permissive (MIT, Apache, BSD)
+
+Create a shortlist of 1-3 candidates, prioritizing:
+1. Official servers from the service provider
+2. High-quality community servers (>500 stars, recent commits)
+3. Servers listed in Smithery with "reviewed" status
+
+### Phase 3: Security Validation
+
+**CRITICAL: Never install unvalidated MCP servers.**
+
+For each candidate, perform security checks following [OWASP MCP Security Guidelines (2026)](https://genai.owasp.org/resource/a-practical-guide-for-secure-mcp-server-development/):
+
+**3.1 Source Code Review**
+```bash
+# Clone the repository
+git clone <repo-url> /tmp/mcp-review-$(date +%s)
+cd /tmp/mcp-review-*
+
+# Check for red flags
+grep -r "eval(" . --include="*.js" --include="*.ts"
+grep -r "exec(" . --include="*.js" --include="*.ts"
+grep -r "child_process" . --include="*.js" --include="*.ts"
+grep -r "fs.writeFile" . --include="*.js" --include="*.ts"
+grep -r "process.env" . --include="*.js" --include="*.ts"
+
+# Review package.json dependencies
+cat package.json | jq '.dependencies, .devDependencies'
+```
+
+**Red Flags (REJECT immediately):**
+- Eval of user input
+- Arbitrary command execution without sandboxing
+- Writes to system directories outside workspace
+- Requests excessive environment variables
+- Obfuscated code
+- No source repository (binary-only)
+- Unsigned packages from unknown authors
+
+**Green Flags (SAFE to proceed):**
+- Official repository (e.g., github.com/linear/mcp-server)
+- Clean dependency tree (no suspicious packages)
+- Clear security.md or security policy
+- Recent commits, active maintenance
+- OAuth 2.1 for authentication (2026 standard)
+- Input validation and sanitization
+- Published by Anthropic, major tech companies, or verified authors
+
+**3.2 Permission Analysis**
+
+Check what the server requests access to:
+```bash
+# Read MCP server configuration
+cat mcp.json || cat server-config.json
+
+# Look for requested capabilities
+# - File system access paths
+# - Environment variables
+# - Network endpoints
+# - OAuth scopes
+```
+
+**3.3 Validation Decision**
+
+Use `AskUserQuestion` if:
+- Server has medium risk (community-maintained, some file access)
+- Need to confirm OAuth scopes
+- Multiple candidates with trade-offs
+
+**Auto-proceed** if:
+- Official server from trusted source (Anthropic, major company)
+- Read-only operations
+- Listed in Smithery with "Anthropic Reviewed" badge
+- Matches all security best practices
+
+**Auto-reject** if:
+- Red flags detected
+- No source code available
+- Unmaintained (>6 months no commits)
+- Excessive permissions
+
+### Phase 4: Installation
+
+**4.1 Prepare Environment**
+
+Check if add-mcp CLI is available:
+```bash
+which add-mcp || npm list -g add-mcp
+```
+
+If not installed:
+```bash
+npm install -g add-mcp
+```
+
+**4.2 Choose Installation Scope**
+
+**Project-level** (default):
+- Isolated to this NanoClaw instance
+- Easier to manage per-group permissions
+- Recommended for most use cases
+
+**Global**:
+- Available to all Claude Code sessions
+- Use for widely-used tools (filesystem, git, etc.)
+
+**4.3 Install via add-mcp**
+
+```bash
+# For remote MCP servers (hosted)
+npx add-mcp <server-url>
+
+# For npm packages
+npx add-mcp npm:<package-name>
+
+# For local servers
+npx add-mcp local:<path-to-server>
+
+# Global installation
+npx add-mcp --global <server-url>
+```
+
+**4.4 Configure for NanoClaw Container**
+
+NanoClaw runs agents in containers, so MCP servers must be accessible inside the container:
+
+**Option A: Remote/Hosted MCP** (Preferred)
+- No additional config needed
+- Runs outside container, accessed via network
+- Example: Smithery-hosted servers
+
+**Option B: Local MCP in Container**
+1. Install MCP server as npm dependency in the project
+2. Add to container mcp config in `src/container-runner.ts`:
+```typescript
+// Add to mcpServers object
+"service-name": {
+  command: "node",
+  args: ["node_modules/service-mcp/dist/index.js"],
+  env: {
+    SERVICE_API_KEY: process.env.SERVICE_API_KEY || ""
+  }
+}
+```
+3. Document required env vars in `.env.example`
+
+**4.5 Add Environment Variables**
+
+If the MCP server requires API keys or config:
+```bash
+# Add to .env
+echo "SERVICE_API_KEY=<key>" >> .env
+
+# Sync to container env
+mkdir -p data/env && cp .env data/env/env
+
+# Add to .env.example for documentation
+echo "SERVICE_API_KEY=" >> .env.example
+```
+
+### Phase 5: Testing & Validation
+
+**5.1 Verify Installation**
+
+```bash
+# Check Claude Code sees the new MCP server
+claude mcp list
+
+# For container-based, check container config
+cat ~/.claude/settings.json | jq '.mcpServers'
+```
+
+**5.2 Test MCP Server**
+
+Create a simple test to verify the server works:
+```bash
+# Rebuild to pick up config changes
+npm run build
+
+# Restart service to load new MCP
+launchctl kickstart -k gui/$(id -u)/com.nanoclaw
+
+# Test with a simple operation
+# (depends on what the MCP provides)
+```
+
+**5.3 Integration Test**
+
+Use the new tool to complete a simple task:
+- For Linear: Create a test issue
+- For Calendar: Fetch today's events
+- For File processor: Process a sample file
+
+**If test fails:**
+1. Check logs: `tail -f logs/nanoclaw.log`
+2. Verify container can reach the server
+3. Check API keys are set correctly
+4. Review MCP server logs if available
+5. Try manual test outside NanoClaw
+
+**5.4 Document Installation**
+
+Create or update `/workspace/group/mcp-servers.md`:
+```markdown
+## Service Name
+
+**Installed:** 2026-02-22
+**Purpose:** What it does
+**Source:** GitHub repo or registry URL
+**Security:** Validation summary (official/reviewed/community)
+**Environment:** Required env vars
+**Usage:** How to invoke in prompts
+
+**Tools available:**
+- `tool-name-1`: Description
+- `tool-name-2`: Description
+```
+
+### Phase 6: Usage & Follow-Up
+
+**6.1 Complete Original Task**
+
+Now that the MCP server is installed, complete the task that triggered the need:
+```
+User: "Create a Linear ticket for this bug"
+→ Use new Linear MCP to create the ticket
+→ Report ticket URL to user
+```
+
+**6.2 Update Group Memory**
+
+Add to the group's `CLAUDE.md` if the tool is group-specific:
+```markdown
+## Available Tools
+
+### Linear Integration
+You have access to Linear via MCP. Use it to:
+- Create issues: describe the issue, it will be created
+- Search issues: query by project, status, assignee
+- Update issues: change status, assignee, description
+
+No need to ask permission — just use it when relevant.
+```
+
+**6.3 Cleanup on Failure**
+
+If installation fails and can't be fixed:
+```bash
+# Remove the MCP server
+claude mcp remove <server-name>
+
+# Or manually remove from settings
+# Edit ~/.claude/settings.json, remove the entry
+```
+
+Tell the user what went wrong and suggest alternatives.
+
+## Security Checklist
+
+Before installing ANY MCP server, verify:
+
+- [ ] Source code is publicly available and reviewable
+- [ ] No arbitrary code execution (eval, child_process without validation)
+- [ ] No writes outside workspace without explicit user permission
+- [ ] Dependencies are clean (no malicious packages)
+- [ ] Authentication uses OAuth 2.1 or API keys (not credentials in code)
+- [ ] Input validation and sanitization present
+- [ ] Maintained within last 3 months OR official/stable release
+- [ ] Permissions match stated purpose (no scope creep)
+- [ ] License is permissive (MIT, Apache, BSD)
+- [ ] Either official source OR high community trust (>500 stars, active)
+
+**If ANY check fails → Do not install without user approval.**
+
+## Registry Reference (2026)
+
+### Primary Registries
+
+**Smithery.ai**
+- URL: https://smithery.ai
+- Features: Hosted + local servers, security reviews
+- Trust level: High (Anthropic partnership)
+- Search: Web interface + API
+
+**LobeHub MCP Directory**
+- URL: https://lobehub.com/mcp
+- Features: Community-curated, detailed docs
+- Trust level: Medium (community-driven)
+- Search: Web interface
+
+**MCP.so**
+- URL: https://mcp.so
+- Features: Search-focused directory
+- Trust level: Medium
+- Search: Web search interface
+
+**GitHub smithery-ai/reference-servers**
+- URL: https://github.com/smithery-ai/reference-servers
+- Features: Official example implementations
+- Trust level: High (official)
+- Search: GitHub code search
+
+### Installation Tools
+
+**add-mcp CLI**
+- Install: `npm install -g add-mcp`
+- Usage: `npx add-mcp <server-url>`
+- Auto-detects: Claude Code, Cursor, VS Code, Codex, etc.
+- Supports: Remote, npm, local servers
+- Scope: Project or global
+
+## Common MCP Servers (Pre-validated)
+
+These are known-safe servers you can install without full security review:
+
+### Official Anthropic Servers
+- **Filesystem**: `@anthropic/filesystem-mcp` - Local file operations
+- **GitHub**: `@anthropic/github-mcp` - GitHub API access
+- **Google Drive**: `@anthropic/google-drive-mcp` - Drive integration
+
+### Verified Community Servers (2026)
+- **Linear**: `linear-mcp-server` (official, Linear team)
+- **Notion**: `notion-mcp-server` (official, Notion)
+- **Slack**: `@slack/mcp-server` (official, Slack)
+- **Google Calendar**: `google-calendar-mcp` (community, >1k stars)
+
+**For these servers:** Skip Phase 3 (Security Validation), proceed directly to installation.
+
+## Troubleshooting
+
+### MCP Server Not Appearing in Tools
+- Check: `claude mcp list` to verify installation
+- Rebuild: `npm run build`
+- Restart: `launchctl kickstart -k gui/$(id -u)/com.nanoclaw`
+- Logs: `tail -f logs/nanoclaw.log` for errors
+
+### Authentication Failures
+- Verify API keys in `.env` are correct
+- Check keys synced to container: `cat data/env/env`
+- Review OAuth flow in MCP server docs
+- Check scopes match required permissions
+
+### Container Can't Reach MCP Server
+- For local MCP: Must be installed in project, not globally
+- For remote MCP: Check network connectivity
+- Verify MCP config in `src/container-runner.ts`
+
+### Tool Poisoning / Unexpected Behavior
+- **IMMEDIATELY DISABLE** the MCP server
+- Check logs for suspicious activity
+- Review source code for malicious patterns
+- Report to registry if confirmed malicious
+- Uninstall: `claude mcp remove <server-name>`
+
+## Examples
+
+### Example 1: Installing Linear MCP
+
+**User request:** "Create a Linear issue for this bug"
+
+**Step 1: Gap Analysis**
+- Need: Linear API access
+- Operations: Write (create issue), potentially read (search)
+- Current tools: None for Linear
+
+**Step 2: Discovery**
+```bash
+# Search registries
+# Found: github.com/linear/linear-mcp (official)
+```
+
+**Step 3: Security Validation**
+- ✅ Official repository from Linear team
+- ✅ OAuth 2.1 authentication
+- ✅ Active maintenance (last commit: 2 weeks ago)
+- ✅ Clean dependencies
+- ✅ No red flags in code review
+- **Decision: SAFE TO INSTALL**
+
+**Step 4: Installation**
+```bash
+# Install via add-mcp
+npx add-mcp npm:@linear/mcp-server
+
+# Add API key to .env
+echo "LINEAR_API_KEY=lin_api_..." >> .env
+
+# Sync to container
+mkdir -p data/env && cp .env data/env/env
+
+# Add to container config (src/container-runner.ts)
+# Rebuild and restart
+npm run build
+launchctl kickstart -k gui/$(id -u)/com.nanoclaw
+```
+
+**Step 5: Testing**
+```bash
+# Verify installation
+claude mcp list | grep linear
+
+# Test: Create a test issue
+# Use Linear MCP to create issue titled "Test - MCP Installation"
+# Verify issue appears in Linear
+```
+
+**Step 6: Complete Task**
+- Create the actual bug issue user requested
+- Report Linear issue URL to user
+- Update `mcp-servers.md` with Linear documentation
+
+### Example 2: User Requests Image Processing
+
+**User request:** "Resize this image to 800x600"
+
+**Step 1: Gap Analysis**
+- Need: Image processing capabilities
+- Operations: Read image, resize, write result
+- Current tools: File read/write only, no image manipulation
+
+**Step 2: Discovery**
+```bash
+# Search: "image processing MCP server"
+# Candidates:
+# 1. @anthropic/image-tools-mcp (doesn't exist - hypothetical)
+# 2. sharp-mcp-server (community, 300 stars)
+# 3. imagemagick-mcp (community, 150 stars)
+```
+
+**Step 3: Security Validation**
+- Review sharp-mcp-server source code
+- ✅ Uses 'sharp' npm package (well-known, safe)
+- ⚠️ Community-maintained, not official
+- ✅ Input validation present
+- ✅ No arbitrary code execution
+- ⚠️ Last commit: 4 months ago
+- **Decision: SAFE but ask user**
+
+**AskUserQuestion:**
+"I found a community MCP server for image processing (sharp-mcp-server, 300 GitHub stars). It's well-reviewed but community-maintained. Install it?"
+
+**If user approves:**
+```bash
+npx add-mcp npm:sharp-mcp-server
+npm run build
+launchctl kickstart -k gui/$(id -u)/com.nanoclaw
+```
+
+**Complete task:** Resize the image
+
+### Example 3: Rejecting Unsafe Server
+
+**User request:** "Use this MCP server: sketchy-automation-tool"
+
+**Step 1: Discovery**
+- Found: github.com/unknown/sketchy-automation-tool
+
+**Step 2: Security Validation**
+```bash
+git clone https://github.com/unknown/sketchy-automation-tool /tmp/mcp-review
+cd /tmp/mcp-review
+
+# Code review findings:
+grep -r "child_process.exec" .
+# → Found: Executes arbitrary commands from user input
+grep -r "eval(" .
+# → Found: Evaluates user-provided code
+# → No input validation
+
+# Red flags:
+# ❌ Arbitrary command execution
+# ❌ Code evaluation without sandboxing
+# ❌ Only 12 GitHub stars
+# ❌ No commits in 8 months
+# ❌ No security policy
+```
+
+**Decision: REJECT**
+
+**Response to user:**
+"I reviewed sketchy-automation-tool and found serious security issues:
+- Executes arbitrary commands without validation
+- Evaluates user code unsafely
+- Unmaintained (8 months no updates)
+
+I cannot install this MCP server as it poses security risks. What are you trying to accomplish? I can suggest safer alternatives."
+
+## Best Practices
+
+1. **Always validate before installing** - Security review is non-negotiable
+2. **Prefer official sources** - Company-maintained > community when available
+3. **Start with read-only** - Install least-privilege version first
+4. **Test in isolation** - Verify behavior before using in production
+5. **Document installations** - Keep `mcp-servers.md` up to date
+6. **Monitor for issues** - Watch for unexpected behavior
+7. **Update regularly** - Keep MCP servers current (but test updates)
+8. **Remove unused servers** - Reduce attack surface
+
+## References
+
+**Security Guidelines:**
+- [OWASP MCP Security Guide (2026)](https://genai.owasp.org/resource/a-practical-guide-for-secure-mcp-server-development/)
+- [MCP Security Best Practices](https://modelcontextprotocol.io/specification/draft/basic/security_best_practices)
+- [WorkOS MCP Security Guide](https://workos.com/blog/mcp-security-risks-best-practices)
+
+**Installation Tools:**
+- [add-mcp CLI](https://neon.com/blog/add-mcp)
+- [Anthropic Desktop Extensions](https://www.anthropic.com/engineering/desktop-extensions)
+
+**Registries:**
+- [Smithery.ai](https://smithery.ai)
+- [LobeHub MCP Directory](https://lobehub.com/mcp)
+- [MCP.so](https://mcp.so)
