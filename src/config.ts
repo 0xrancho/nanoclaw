@@ -89,3 +89,32 @@ export const DASHBOARD_PORT = parseInt(
   process.env.DASHBOARD_PORT || '3001',
   10,
 );
+
+// Business hours gate for managed conversations and email polling.
+// Format: "HH-HH" (24h). Set to "" to disable the gate (run 24/7).
+export const BUSINESS_HOURS = process.env.BUSINESS_HOURS || '7-19'; // 7am–7pm
+export const BUSINESS_DAYS = process.env.BUSINESS_DAYS || '1-5'; // Mon–Fri (1=Mon, 7=Sun)
+
+// Recovery sweep interval — how often to check for unprocessed messages
+// that fell through after retry exhaustion.
+export const RECOVERY_SWEEP_INTERVAL = parseInt(
+  process.env.RECOVERY_SWEEP_INTERVAL || '60000',
+  10,
+); // 1 minute
+
+/**
+ * Returns true if current time is within business hours.
+ * Used to gate managed conversation processing and email polling.
+ */
+export function isBusinessHours(): boolean {
+  if (!BUSINESS_HOURS) return true;
+
+  const now = new Date();
+  const hour = now.getHours();
+  const dayOfWeek = now.getDay() || 7; // Convert Sunday from 0 to 7
+
+  const [startHour, endHour] = BUSINESS_HOURS.split('-').map(Number);
+  const [startDay, endDay] = BUSINESS_DAYS.split('-').map(Number);
+
+  return dayOfWeek >= startDay && dayOfWeek <= endDay && hour >= startHour && hour < endHour;
+}

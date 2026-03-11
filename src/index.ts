@@ -10,8 +10,10 @@ import {
   IDLE_TIMEOUT,
   MAIN_GROUP_FOLDER,
   POLL_INTERVAL,
+  RECOVERY_SWEEP_INTERVAL,
   TELEGRAM_BOT_TOKEN,
   TRIGGER_PATTERN,
+  isBusinessHours,
 } from './config.js';
 import { EmailChannel } from './channels/email.js';
 import { TelegramChannel } from './channels/telegram.js';
@@ -357,7 +359,16 @@ async function startMessageLoop(): Promise<void> {
 
   logger.info(`NanoClaw running (trigger: @${ASSISTANT_NAME})`);
 
+  // Periodic recovery sweep — catches messages that fell through after
+  // retry exhaustion. Runs every RECOVERY_SWEEP_INTERVAL (default 60s).
+  let lastRecoverySweep = Date.now();
+
   while (true) {
+    // Recovery sweep for abandoned messages
+    if (Date.now() - lastRecoverySweep >= RECOVERY_SWEEP_INTERVAL) {
+      recoverPendingMessages();
+      lastRecoverySweep = Date.now();
+    }
     try {
       const jids = Object.keys(registeredGroups);
       const { messages, newTimestamp } = getNewMessages(jids, lastTimestamp, ASSISTANT_NAME);
@@ -383,6 +394,12 @@ async function startMessageLoop(): Promise<void> {
         for (const [chatJid, groupMessages] of messagesByGroup) {
           const group = registeredGroups[chatJid];
           if (!group) continue;
+
+          // Gate managed conversations to business hours only.
+          // Messages stay in DB and will be processed when hours resume.
+          if (chatJid.startsWith('managed:') && !isBusinessHours()) {
+            continue;
+          }
 
           const channel = findChannel(channels, chatJid);
           if (!channel) {
@@ -448,6 +465,9 @@ async function startMessageLoop(): Promise<void> {
  */
 function recoverPendingMessages(): void {
   for (const [chatJid, group] of Object.entries(registeredGroups)) {
+    // Skip managed conversations outside business hours
+    if (chatJid.startsWith('managed:') && !isBusinessHours()) continue;
+
     const sinceTimestamp = lastAgentTimestamp[chatJid] || '';
     const pending = getMessagesSince(chatJid, sinceTimestamp, ASSISTANT_NAME);
     if (pending.length > 0) {

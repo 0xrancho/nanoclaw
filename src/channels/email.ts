@@ -2,6 +2,7 @@ import fs from 'fs';
 import https from 'https';
 import path from 'path';
 
+import { isBusinessHours } from '../config.js';
 import { logger } from '../logger.js';
 import {
   Channel,
@@ -651,6 +652,9 @@ export class EmailChannel implements Channel {
   // --- Polling ---
 
   private async pollAllAccounts(): Promise<void> {
+    // Skip email polling outside business hours
+    if (!isBusinessHours()) return;
+
     // Reload allowlist periodically (hot-reload without restart)
     if (Date.now() - this.lastAllowlistLoad > EmailChannel.ALLOWLIST_RELOAD_INTERVAL) {
       this.loadAllowlist();
